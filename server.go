@@ -54,9 +54,9 @@ func (s *Server) getDefaultableEnvAsInt(name, defaultValue string) int {
 	return i
 }
 
-// Init performs default initialisation and then applies
+// init performs default initialisation and then applies
 // api version routes and handling
-func (s *Server) Init(apis []RegisterApiVersion) error {
+func (s *Server) init(apis []RegisterApiVersion, healthCheck http.HandlerFunc) error {
 
 	s.logger.Println("initialising")
 
@@ -116,7 +116,7 @@ func (s *Server) Init(apis []RegisterApiVersion) error {
 	}
 
 	// Add healthcheck
-	get.HandleFunc(fmt.Sprintf("/%s", healthPath), s.HealthCheck).Methods("GET")
+	get.HandleFunc(fmt.Sprintf("/%s", healthPath), healthCheck).Methods("GET")
 
 	// Bind to a port and pass our router in
 	s.srv = &http.Server{
@@ -166,9 +166,21 @@ func (s *Server) Start() {
 }
 
 // NewServer returns a non-started, initialised Server instance
-func NewServer(apis []RegisterApiVersion, logger *log.Logger) (*Server, error) {
+func NewServer(apis []RegisterApiVersion, logger *log.Logger, healthCheck http.HandlerFunc) (*Server, error) {
+	// Use default logger if not specified
+	if logger == nil {
+		logger = log.Default()
+	}
+
 	s := &Server{logger: logger}
-	if err := s.Init(apis); err != nil {
+
+	// Use default heath check if not specified
+	if healthCheck == nil {
+		healthCheck = s.HealthCheck
+	}
+
+	// Initise once
+	if err := s.init(apis, healthCheck); err != nil {
 		return nil, err
 	}
 	return s, nil

@@ -14,7 +14,7 @@ The `POST` route additionally restricts request objects to be `application/json`
 
 Multiple apis can be registered using `RegisterApiVersion`, but must have a unique path prefix.
 
-The `Server` also contains a rudimentary health check at `/api/health`.
+The `Server` also contains a rudimentary health check at `/api/health` which is applied by default if one is not specified in the call to `NewServer`.
 
 
 ```go
@@ -37,6 +37,7 @@ func main() {
 			addApi,
 		},
 		log.Default(),
+		nil,  // Use default health check
 	)
 	if err != nil {
 		log.Fatal(err)
