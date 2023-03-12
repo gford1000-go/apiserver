@@ -12,33 +12,23 @@ The `Server` initialises via environment variables, establishing two distinct ro
 
 The `POST` route additionally restricts request objects to be `application/json` and both only return responses of this content type.
 
-Multiple apis can be registered using `RegisterApiVersion`, but must have a unique path prefix.
+The `Config` struct provides a simple way to configure the basic `Server` details and construct the various API specifications.
 
-The `Server` also contains a rudimentary health check at `/api/health` which is applied by default if one is not specified in the call to `NewServer`.
+The `Server` is initialised as part of the `NewServer` function and begins handling requests once `Start` is called.
 
 
 ```go
-func addApi(getReqs *mux.Router, postReqs *mux.Router) (string, error) {
-	prefix := "/v1/"
-
-	// Simple ping
-	api := getReqs.PathPrefix(prefix).Subrouter()
-	api.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Add("Content-Encoding", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"ping":"pong"})
-	})
-
-	return prefix, nil
-}
-
 func main() {
-	s, err := NewServer(
-		[]RegisterApiVersion{
-			addApi,
-		},
-		log.Default(),
-		nil,  // Use default health check
-	)
+
+	c := NewConfig()
+
+	c.NewSpecification("v1").
+		AddGetPath("/ping", func(vars map[string]string, w http.ResponseWriter, r *http.Request){
+			w.Header().Add("Content-Encoding", "application/json")
+			json.NewEncoder(w).Encode(map[string]string{"ping":"pong"})
+		}
+
+	s, err := NewServer(c)
 	if err != nil {
 		log.Fatal(err)
 	}

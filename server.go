@@ -2,7 +2,6 @@ package apiserver
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -15,11 +14,6 @@ import (
 	"github.com/gorilla/mux"
 )
 
-// RegisterApiVersion allows GET and POST path support,
-// returning the prefix to the api (either /vXXX/ or just vX), which
-// must be unique across all registration
-type RegisterApiVersion func(get, post *mux.Router) (string, error)
-
 // Server initialises and runs a http.Server to handle http requests
 type Server struct {
 	srv          *http.Server
@@ -29,14 +23,7 @@ type Server struct {
 	exitTimeout  int
 }
 
-func (s *Server) NotAllowed(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, "Not Allowed", http.StatusNotFound)
-}
-
-func (s *Server) HealthCheck(w http.ResponseWriter, r *http.Request) {
-	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
-}
-
+// getDefaultableEnv returns the value of an environment variable or default
 func (s *Server) getDefaultableEnv(name, defaultValue string) string {
 	str := os.Getenv(name)
 	if len(str) == 0 {
@@ -45,6 +32,7 @@ func (s *Server) getDefaultableEnv(name, defaultValue string) string {
 	return str
 }
 
+// getDefaultableEnvAsInt casts environment variable value to an int
 func (s *Server) getDefaultableEnvAsInt(name, defaultValue string) int {
 	str := s.getDefaultableEnv(name, defaultValue)
 	i, err := strconv.Atoi(str)
@@ -56,7 +44,7 @@ func (s *Server) getDefaultableEnvAsInt(name, defaultValue string) int {
 
 // init performs default initialisation and then applies
 // api version routes and handling
-func (s *Server) init(apis []RegisterApiVersion, healthCheck http.HandlerFunc) error {
+func (s *Server) init(config *Config) error {
 
 	s.logger.Println("initialising")
 
@@ -83,40 +71,28 @@ func (s *Server) init(apis []RegisterApiVersion, healthCheck http.HandlerFunc) e
 	// POST requests must provide JSON based request objects
 	get := d.
 		PathPrefix(fmt.Sprintf("/%s/", apiPrefix)).
-		Methods("POST", "GET").
+		Methods("GET").
 		Schemes(scheme).Subrouter()
 
 	post := d.
 		PathPrefix(fmt.Sprintf("/%s/", apiPrefix)).
 		HeadersRegexp("Content-Type", "application/json").
-		Methods("POST", "GET").
+		Methods("POST").
 		Schemes(scheme).Subrouter()
 
-	// Initialise implementations of the API for each version.
-	// Each registered version implementation must have a unique
-	// prefix
 	registered := map[string]bool{}
-	for _, api := range apis {
-		if version, err := api(get, post); err != nil {
-			return err
+	for _, spec := range config.specs {
+		if _, ok := registered[spec.prefix]; ok {
+			return fmt.Errorf("attempt to register %s twice", spec.prefix)
 		} else {
-			// Prefix must look like /{version}/
-			if version[0:] != "/" {
-				version = "/" + version
-			}
-			if version[:len(version)-1] != "/" {
-				version = version + "/"
-			}
-			if _, ok := registered[version]; ok {
-				return fmt.Errorf("attempt to register %s twice", version)
-			} else {
-				registered[version] = true
-			}
+			registered[spec.prefix] = true
 		}
+
+		s.addSpecification(spec, get, post)
 	}
 
 	// Add healthcheck
-	get.HandleFunc(fmt.Sprintf("/%s", healthPath), healthCheck).Methods("GET")
+	get.HandleFunc(fmt.Sprintf("/%s", healthPath), config.hc).Methods("GET")
 
 	// Bind to a port and pass our router in
 	s.srv = &http.Server{
@@ -127,6 +103,27 @@ func (s *Server) init(apis []RegisterApiVersion, healthCheck http.HandlerFunc) e
 	}
 
 	return nil
+}
+
+// addMethodSpecification creates a subrouter for the specified prefix and applies
+// the paths to it in the order defined
+func (s *Server) addMethodSpecification(prefix string, r *mux.Router, paths []APIPath) {
+
+	if len(paths) > 0 {
+		api := r.PathPrefix(prefix).Subrouter()
+
+		for _, path := range paths {
+			api.HandleFunc(path.path, func(w http.ResponseWriter, req *http.Request) {
+				path.handler(mux.Vars(req), w, req)
+			})
+		}
+	}
+}
+
+// addSpecification creates GET and POST api handlers
+func (s *Server) addSpecification(spec *APISpecification, getReqs *mux.Router, postReqs *mux.Router) {
+	s.addMethodSpecification(spec.prefix, getReqs, spec.gets)
+	s.addMethodSpecification(spec.prefix, postReqs, spec.posts)
 }
 
 // Start causes the Server to start handling requests
@@ -166,21 +163,12 @@ func (s *Server) Start() {
 }
 
 // NewServer returns a non-started, initialised Server instance
-func NewServer(apis []RegisterApiVersion, logger *log.Logger, healthCheck http.HandlerFunc) (*Server, error) {
-	// Use default logger if not specified
-	if logger == nil {
-		logger = log.Default()
-	}
+func NewServer(config Config) (*Server, error) {
 
-	s := &Server{logger: logger}
-
-	// Use default heath check if not specified
-	if healthCheck == nil {
-		healthCheck = s.HealthCheck
-	}
+	s := &Server{logger: config.l}
 
 	// Initise once
-	if err := s.init(apis, healthCheck); err != nil {
+	if err := s.init(&config); err != nil {
 		return nil, err
 	}
 	return s, nil
