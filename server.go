@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strconv"
 	"strings"
 	"time"
 
@@ -16,30 +15,9 @@ import (
 
 // Server initialises and runs a http.Server to handle http requests
 type Server struct {
-	srv          *http.Server
-	logger       *log.Logger
-	readTimeout  int
-	writeTimeout int
-	exitTimeout  int
-}
-
-// getDefaultableEnv returns the value of an environment variable or default
-func (s *Server) getDefaultableEnv(name, defaultValue string) string {
-	str := os.Getenv(name)
-	if len(str) == 0 {
-		str = defaultValue
-	}
-	return str
-}
-
-// getDefaultableEnvAsInt casts environment variable value to an int
-func (s *Server) getDefaultableEnvAsInt(name, defaultValue string) int {
-	str := s.getDefaultableEnv(name, defaultValue)
-	i, err := strconv.Atoi(str)
-	if err != nil {
-		s.logger.Panicf("could not convert (%s) to int, for '%s'", str, name)
-	}
-	return i
+	exitTimeout int
+	logger      *log.Logger
+	srv         *http.Server
 }
 
 // init performs default initialisation and then applies
@@ -48,37 +26,29 @@ func (s *Server) init(config *Config) error {
 
 	s.logger.Println("initialising")
 
-	// Environment specific details
-	port := s.getDefaultableEnv("PORT", "8080")                     // 8080
-	domain := s.getDefaultableEnv("DOMAIN", "localhost")            // example.com
-	subdomain := s.getDefaultableEnv("SUBDOMAIN", "")               // {subdomain:[a-z]+} or www
-	scheme := s.getDefaultableEnv("SCHEME", "http")                 // https
-	apiPrefix := s.getDefaultableEnv("APIPREFIX", "api")            // api
-	healthPath := s.getDefaultableEnv("HEALTHROUTE", "health")      // health
-	s.writeTimeout = s.getDefaultableEnvAsInt("WRITETIMEOUT", "15") // seconds
-	s.readTimeout = s.getDefaultableEnvAsInt("READTIMEOUT", "15")   // seconds
-	s.exitTimeout = s.getDefaultableEnvAsInt("EXITTIMEOUT", "10")   // seconds
+	// Store exitTimeout
+	s.exitTimeout = config.exitTimeout
 
 	r := mux.NewRouter()
 
 	// Subroute based on domain and subdomain if specified
 	d := r
-	if strings.ToLower(domain) != "localhost" {
-		d = r.Host(fmt.Sprintf("%s.%s", subdomain, domain)).Subrouter()
+	if strings.ToLower(config.domain) != "localhost" {
+		d = r.Host(fmt.Sprintf("%s.%s", config.subdomain, config.domain)).Subrouter()
 	}
 
 	// Api only, with only GET and POST requests processed, where
 	// POST requests must provide JSON based request objects
 	get := d.
-		PathPrefix(fmt.Sprintf("/%s/", apiPrefix)).
+		PathPrefix(config.apiPrefix).
 		Methods("GET").
-		Schemes(scheme).Subrouter()
+		Schemes(config.scheme).Subrouter()
 
 	post := d.
-		PathPrefix(fmt.Sprintf("/%s/", apiPrefix)).
+		PathPrefix(config.apiPrefix).
 		HeadersRegexp("Content-Type", "application/json").
 		Methods("POST").
-		Schemes(scheme).Subrouter()
+		Schemes(config.scheme).Subrouter()
 
 	registered := map[string]bool{}
 	for _, spec := range config.specs {
@@ -92,14 +62,14 @@ func (s *Server) init(config *Config) error {
 	}
 
 	// Add healthcheck
-	get.HandleFunc(fmt.Sprintf("/%s", healthPath), config.hc).Methods("GET")
+	get.HandleFunc(fmt.Sprintf("/%s", config.healthPath), config.hc).Methods("GET")
 
 	// Bind to a port and pass our router in
 	s.srv = &http.Server{
 		Handler:      r,
-		Addr:         fmt.Sprintf("127.0.0.1:%s", port),
-		WriteTimeout: time.Duration(s.writeTimeout) * time.Second,
-		ReadTimeout:  time.Duration(s.readTimeout) * time.Second,
+		Addr:         fmt.Sprintf("127.0.0.1:%s", config.port),
+		WriteTimeout: time.Duration(config.writeTimeout) * time.Second,
+		ReadTimeout:  time.Duration(config.readTimeout) * time.Second,
 	}
 
 	return nil

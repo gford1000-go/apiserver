@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -15,20 +17,128 @@ func healthCheck(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 }
 
-// NewConfig returns a new instance of Config
+// validPrefix ensures the prefix is correct for a SubRouter
+func validPrefix(prefix string, requireTrailingSlash bool) string {
+	prefix = strings.ToLower(prefix)
+
+	if !regexp.MustCompile("^[/]?[a-z][a-z0-9]*[/]?$").MatchString(prefix) {
+		panic(fmt.Errorf("prefix (%s) is invalid", prefix))
+	}
+	if prefix[0:] != "/" {
+		prefix = "/" + prefix
+	}
+	if requireTrailingSlash && prefix[:len(prefix)-1] != "/" {
+		prefix = prefix + "/"
+	}
+
+	return prefix
+}
+
+// NewConfig returns a new instance of Config, initialising many components
+// using environment variables if defined.  All environment variable values are
+// overridable via code.
 func NewConfig() *Config {
-	return &Config{
+	c := &Config{
 		l:     log.Default(),
 		hc:    healthCheck,
 		specs: []*APISpecification{},
 	}
+
+	// Environment specific details
+	c.Port(c.getDefaultableEnvAsInt("PORT", "8080"))
+	c.domain = c.getDefaultableEnv("DOMAIN", "localhost")
+	c.subdomain = c.getDefaultableEnv("SUBDOMAIN", "")              // {subdomain:[a-z]+} or www
+	c.scheme = c.getDefaultableEnv("SCHEME", "http")                // https
+	c.ApiPathPrefix(c.getDefaultableEnv("APIPREFIX", "api"))        // api
+	c.HealthcheckPath(c.getDefaultableEnv("HEALTHROUTE", "health")) // health
+	c.WriteTimeout(c.getDefaultableEnvAsInt("WRITETIMEOUT", "15"))  // seconds
+	c.ReadTimeout(c.getDefaultableEnvAsInt("READTIMEOUT", "15"))    // seconds
+	c.ExitTimeout(c.getDefaultableEnvAsInt("EXITTIMEOUT", "10"))    // seconds
+
+	return c
 }
 
 // Config allows the Server to be configured as required
 type Config struct {
-	l     *log.Logger
-	hc    http.HandlerFunc
-	specs []*APISpecification
+	apiPrefix    string
+	domain       string
+	exitTimeout  int
+	hc           http.HandlerFunc
+	healthPath   string
+	l            *log.Logger
+	port         string
+	readTimeout  int
+	scheme       string
+	specs        []*APISpecification
+	subdomain    string
+	writeTimeout int
+}
+
+// getDefaultableEnv returns the value of an environment variable or default
+func (c *Config) getDefaultableEnv(name, defaultValue string) string {
+	str := os.Getenv(name)
+	if len(str) == 0 {
+		str = defaultValue
+	}
+	return str
+}
+
+// getDefaultableEnvAsInt casts environment variable value to an int
+func (c *Config) getDefaultableEnvAsInt(name, defaultValue string) int {
+	str := c.getDefaultableEnv(name, defaultValue)
+	i, err := strconv.Atoi(str)
+	if err != nil {
+		c.l.Panicf("could not convert (%s) to int, for '%s'", str, name)
+	}
+	return i
+}
+
+// ApiPathPrefix represents the initial path prefix to the API, eg /api/...
+func (c *Config) ApiPathPrefix(prefix string) *Config {
+	c.apiPrefix = validPrefix(prefix, true)
+	return c
+}
+
+// HealthcheckPath represents the path from the ApiPathPrefix that identifies the health check
+func (c *Config) HealthcheckPath(path string) *Config {
+	c.healthPath = validPrefix(path, false)
+	return c
+}
+
+// WriteTimeout sets the timeout in seconds for writes
+func (c *Config) WriteTimeout(seconds int) *Config {
+	if seconds < 0 {
+		c.l.Panicf("invalid write time specified (%d) seconds", seconds)
+	}
+	c.writeTimeout = seconds
+	return c
+}
+
+// ReadTimeout sets the timeout in seconds for reads
+func (c *Config) ReadTimeout(seconds int) *Config {
+	if seconds < 0 {
+		c.l.Panicf("invalid read time specified (%d) seconds", seconds)
+	}
+	c.readTimeout = seconds
+	return c
+}
+
+// ExitTimeout sets the timeout in seconds for a graceful exit
+func (c *Config) ExitTimeout(seconds int) *Config {
+	if seconds < 0 {
+		c.l.Panicf("invalid exit time specified (%d) seconds", seconds)
+	}
+	c.exitTimeout = seconds
+	return c
+}
+
+// Port allows the port to be specified
+func (c *Config) Port(port int) *Config {
+	if port < 0 || port > 65000 {
+		c.l.Panicf("invalid port %v", port)
+	}
+	c.port = fmt.Sprint(port)
+	return c
 }
 
 // Logger allows a specific Logger to be used
@@ -51,24 +161,7 @@ func (c *Config) NewSpecification(prefix string) *APISpecification {
 		panic(errors.New("prefix must be specfiied"))
 	}
 
-	prefix = strings.ToLower(prefix)
-
-	if !regexp.MustCompile("^[/]?[a-z][a-z0-9]*[/]?$").MatchString(prefix) {
-		panic(fmt.Errorf("prefix (%s) is invalid", prefix))
-	}
-	if prefix[0:] != "/" {
-		prefix = "/" + prefix
-	}
-	if prefix[:len(prefix)-1] != "/" {
-		prefix = prefix + "/"
-	}
-
-	for _, spec := range c.specs {
-		if spec.prefix == prefix {
-			return spec
-		}
-
-	}
+	prefix = validPrefix(prefix, true)
 
 	spec := &APISpecification{
 		l:      c.l,
