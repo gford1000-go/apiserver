@@ -46,9 +46,9 @@ func NewConfig() *Config {
 
 	// Environment specific details
 	c.Port(c.getDefaultableEnvAsInt("PORT", "8080"))
-	c.domain = c.getDefaultableEnv("DOMAIN", "localhost")
-	c.subdomain = c.getDefaultableEnv("SUBDOMAIN", "")              // {subdomain:[a-z]+} or www
-	c.scheme = c.getDefaultableEnv("SCHEME", "http")                // https
+	c.Domain(c.getDefaultableEnv("DOMAIN", "localhost"))
+	c.Subdomain(c.getDefaultableEnv("SUBDOMAIN", ""))               // {subdomain:[a-z]+} or www
+	c.Scheme(c.getDefaultableEnv("SCHEME", "http"))                 // https
 	c.ApiPathPrefix(c.getDefaultableEnv("APIPREFIX", "api"))        // api
 	c.HealthcheckPath(c.getDefaultableEnv("HEALTHROUTE", "health")) // health
 	c.WriteTimeout(c.getDefaultableEnvAsInt("WRITETIMEOUT", "15"))  // seconds
@@ -96,6 +96,24 @@ func (c *Config) getDefaultableEnvAsInt(name, defaultValue string) int {
 // ApiPathPrefix represents the initial path prefix to the API, eg /api/...
 func (c *Config) ApiPathPrefix(prefix string) *Config {
 	c.apiPrefix = validPrefix(prefix, true)
+	return c
+}
+
+// Domain represents the domain of the URL
+func (c *Config) Domain(domain string) *Config {
+	c.domain = domain
+	return c
+}
+
+// Subdomain represents the subdomain of the URL
+func (c *Config) Subdomain(subdomain string) *Config {
+	c.subdomain = subdomain
+	return c
+}
+
+// Scheme represents the scheme of the URL
+func (c *Config) Scheme(scheme string) *Config {
+	c.scheme = scheme
 	return c
 }
 
