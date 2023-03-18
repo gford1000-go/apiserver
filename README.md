@@ -22,11 +22,36 @@ func main() {
 
 	c := NewConfig()
 
+	// Version 1 of the API returns a single pong for every ping
 	c.NewSpecification("v1").
-		AddGetPath("/ping", func(vars map[string]string, w http.ResponseWriter, r *http.Request){
+		AddGetPath("/ping", func(vars map[string]string, w http.ResponseWriter, r *http.Request) {
 			w.Header().Add("Content-Encoding", "application/json")
-			json.NewEncoder(w).Encode(map[string]string{"ping":"pong"})
-		}
+			json.NewEncoder(w).Encode(map[string]string{"ping": "pong"})
+		})
+
+	// Version 2 allows one or more pongs, specified by the request
+	c.NewSpecification("v2").
+		AddGetPath("/ping/{num_pings}", func(vars map[string]string, w http.ResponseWriter, r *http.Request) {
+			s, ok := vars["num_pings"]
+			if !ok {
+				s = "1"
+			}
+			n, err := strconv.Atoi(s)
+			if err != nil {
+				http.Error(w, fmt.Sprintf("Invalid number of pings: '%s'", s), http.StatusBadRequest)
+				return
+			}
+			if n < 1 {
+				http.Error(w, fmt.Sprintf("Invalid number of pings: '%d'", n), http.StatusBadRequest)
+				return
+			}
+			w.Header().Add("Content-Encoding", "application/json")
+			pongs := []string{}
+			for i := 0; i < n; i++ {
+				pongs = append(pongs, "pong")
+			}
+			json.NewEncoder(w).Encode(map[string][]string{"ping": pongs})
+		})
 
 	s, err := NewServer(c)
 	if err != nil {
