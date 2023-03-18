@@ -6,8 +6,11 @@ import (
 	"strings"
 )
 
-// APIHandler extends http.HandleFunc to include path variables map, in case variables are defined
-type APIHandler func(pathVars map[string]string, w http.ResponseWriter, r *http.Request)
+// PathVariableRetriever provides a mechanism to return a defaultable path value
+type PathVariableRetriever func(variableName string, defaultValue interface{}) (interface{}, error)
+
+// APIHandler extends http.HandleFunc to return values of path variables, allowing defaults
+type APIHandler func(retriever PathVariableRetriever, w http.ResponseWriter, r *http.Request)
 
 // APIPath describes a given path (which may include variables) and its handler
 type APIPath struct {

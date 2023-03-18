@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"reflect"
+	"strconv"
 	"strings"
 	"time"
 
@@ -75,6 +77,59 @@ func (s *Server) init(config *Config) error {
 	return nil
 }
 
+// getRetriever creates a path variable retriever function instance, that can apply the
+// specified default value if the path variable is missing.
+// If the path variable exists, then an attempt to convert the value of the path variable is made,
+// into the type of the default value.
+//   If the default value is nil, then the value of the path variable is returned as a string
+//   If the default value is a string, then the value is returned as a string
+//   If the default value is of type int, *int, int32, *int32, int64, *int64, then a conversion is attempted
+//   For all other types, an error is raised
+func (s *Server) getRetriever(req *http.Request) PathVariableRetriever {
+	m := mux.Vars(req)
+
+	return func(variableName string, defaultValue interface{}) (interface{}, error) {
+		variableName = strings.ToLower(variableName)
+		s, ok := m[variableName]
+		if !ok {
+			return defaultValue, nil
+		}
+		if defaultValue == nil {
+			return s, nil
+		}
+		switch defaultValue.(type) {
+		case string:
+			return s, nil
+		case int:
+			return strconv.Atoi(s)
+		case *int:
+			i, err := strconv.Atoi(s)
+			if err != nil {
+				return nil, err
+			}
+			return &i, nil
+		case int32:
+			return strconv.ParseInt(s, 10, 32)
+		case *int32:
+			i, err := strconv.ParseInt(s, 10, 32)
+			if err != nil {
+				return nil, err
+			}
+			return &i, nil
+		case int64:
+			return strconv.ParseInt(s, 10, 64)
+		case *int64:
+			i, err := strconv.ParseInt(s, 10, 64)
+			if err != nil {
+				return nil, err
+			}
+			return &i, nil
+		default:
+			return nil, fmt.Errorf("unable to convert to type %v", reflect.TypeOf(defaultValue))
+		}
+	}
+}
+
 // addMethodSpecification creates a subrouter for the specified prefix and applies
 // the paths to it in the order defined
 func (s *Server) addMethodSpecification(prefix string, r *mux.Router, paths []APIPath) {
@@ -84,7 +139,7 @@ func (s *Server) addMethodSpecification(prefix string, r *mux.Router, paths []AP
 
 		for _, path := range paths {
 			api.HandleFunc(path.path, func(w http.ResponseWriter, req *http.Request) {
-				path.handler(mux.Vars(req), w, req)
+				path.handler(s.getRetriever(req), w, req)
 			})
 		}
 	}
